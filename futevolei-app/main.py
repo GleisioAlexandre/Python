@@ -242,13 +242,13 @@ def ui_generate():
     db_matches.append(Match(id=4, bracket=BracketType.WINNERS, phase=1, team1_id=t7, team2_id=t8, winner_next_match_id=6, loser_next_match_id=9, loser_slot=2))
 
     # Fase 2
+    # Perdedores de cima caem para os jogos 11 e 10 na Posição 1
     db_matches.append(Match(id=5, bracket=BracketType.WINNERS, phase=2, winner_next_match_id=7, loser_next_match_id=11, loser_slot=1))
     db_matches.append(Match(id=6, bracket=BracketType.WINNERS, phase=2, winner_next_match_id=7, loser_next_match_id=10, loser_slot=1))
 
-    # Fase 3 (Final de Cima)
+    # Fase 3 (Final da Chave Superior)
     # Vencedor -> Jogo 13 (Grande Final, Slot 1)
-    # Perdedor -> Jogo 12 (Final dos Perdedores, Slot 1)
-    db_matches.append(Match(id=7, bracket=BracketType.WINNERS, phase=3, winner_next_match_id=13, loser_next_match_id=12, loser_slot=1))
+    db_matches.append(Match(id=7, bracket=BracketType.WINNERS, phase=3, winner_next_match_id=13))
 
     # 2. CHAVE DE BAIXO (Losers)
     # Perdedores Fase 1
@@ -256,16 +256,17 @@ def ui_generate():
     db_matches.append(Match(id=9, bracket=BracketType.LOSERS, phase=1, winner_next_match_id=11))
 
     # Perdedores Fase 2
+    # Vencedor do Jogo 10 -> Vai para o Jogo 12 na Posição 1 (Topo)
+    # Vencedor do Jogo 11 -> Vai para o Jogo 12 na Posição 2 (Baixo)
     db_matches.append(Match(id=10, bracket=BracketType.LOSERS, phase=2, winner_next_match_id=12))
     db_matches.append(Match(id=11, bracket=BracketType.LOSERS, phase=2, winner_next_match_id=12))
 
     # Perdedores Fase 3 (Final da Repescagem)
-    # Recebe o perdedor do Jogo 7 (Slot 1) e o sobrevivente dos perdedores (Slot 2).
     # Vencedor -> Jogo 13 (Grande Final, Slot 2)
     db_matches.append(Match(id=12, bracket=BracketType.LOSERS, phase=3, winner_next_match_id=13))
 
     # 3. GRANDE FINAL (Jogo 13)
-    # Vencedor da Fase 3 de Cima (Jogo 7) vs Vencedor da Fase 3 de Baixo (Jogo 12)
+    # Vencedor do Jogo 7 (Slot 1) vs Vencedor do Jogo 12 (Slot 2)
     db_matches.append(Match(id=13, bracket=BracketType.FINALS, phase=1))
 
     return HTMLResponse('<script>window.location.href="/";</script>')
@@ -286,16 +287,19 @@ def ui_set_score(match_id: int = Form(...), score1: int = Form(...), score2: int
         if match.winner_next_match_id:
             next_w = next((m for m in db_matches if m.id == match.winner_next_match_id), None)
             if next_w:
-                # Perdedores Fase 1 (Jogo 8/9) -> Vai para a Posição 2 (Baixo) da Fase 2 (Jogo 10/11)
+                # Perdedores Fase 1 (Jogo 8/9) -> Posição 2 (Baixo) do Jogo 10/11
                 if match.bracket == BracketType.LOSERS and match.phase == 1:
                     next_w.team2_id = match.winner_id
-                # Vencedor do Jogo 10 e 11 -> Preenche o Slot 2 do Jogo 12
-                elif match.id in [10, 11]:
+                # Vencedor do Jogo 10 -> Posição 1 (Topo) do Jogo 12
+                elif match.id == 10:
+                    next_w.team1_id = match.winner_id
+                # Vencedor do Jogo 11 -> Posição 2 (Baixo) do Jogo 12
+                elif match.id == 11:
                     next_w.team2_id = match.winner_id
-                # Vencedor da Fase 3 dos Perdedores (Jogo 12) -> Vai para o Slot 2 da Grande Final (Jogo 13)
+                # Vencedor da Fase 3 dos Perdedores (Jogo 12) -> Slot 2 da Grande Final (Jogo 13)
                 elif match.id == 12:
                     next_w.team2_id = match.winner_id
-                # Vencedor da Fase 3 de Cima (Jogo 7) -> Vai para o Slot 1 da Grande Final (Jogo 13)
+                # Vencedor da Fase 3 de Cima (Jogo 7) -> Slot 1 da Grande Final (Jogo 13)
                 elif match.id == 7:
                     next_w.team1_id = match.winner_id
                 else:
@@ -304,7 +308,7 @@ def ui_set_score(match_id: int = Form(...), score1: int = Form(...), score2: int
                     else:
                         next_w.team2_id = match.winner_id
 
-        # 2. MOVER O PERDEDOR (Para quem cai de cima)
+        # 2. MOVER O PERDEDOR (Que cai de cima)
         if match.loser_next_match_id:
             next_l = next((m for m in db_matches if m.id == match.loser_next_match_id), None)
             if next_l:
