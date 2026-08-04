@@ -19,6 +19,7 @@ class Match(BaseModel):
     id: int
     bracket: BracketType
     phase: int
+    title: str
     team1_id: Optional[int] = None
     team2_id: Optional[int] = None
     score_team1: int = 0
@@ -27,6 +28,7 @@ class Match(BaseModel):
     loser_id: Optional[int] = None
     winner_next_match_id: Optional[int] = None
     loser_next_match_id: Optional[int] = None
+    winner_slot: int = 1
     loser_slot: int = 1
 
 db_teams: List[Team] = []
@@ -79,8 +81,9 @@ def home_ui():
             btn_class = "bg-amber-500 text-slate-900 hover:bg-amber-400 font-black" if ready else "bg-gray-300 text-gray-500 cursor-not-allowed"
 
             cards += f'''
-            <div class="bg-white border-2 border-gray-300 rounded-lg p-3 shadow-md w-64 my-3 flex-shrink-0">
-                <div class="text-[10px] font-black text-gray-400 mb-1 flex justify-between uppercase">
+            <div id="match-{m.id}" data-wnext="{m.winner_next_match_id or ''}" data-lnext="{m.loser_next_match_id or ''}" class="match-card bg-white border-2 border-gray-300 rounded-lg p-3 shadow-md w-64 my-3 flex-shrink-0 relative z-10">
+                <div class="text-[10px] font-black text-gray-500 mb-1 flex justify-between uppercase">
+                    <span>{m.title}</span>
                     <span>Jogo #{m.id}</span>
                 </div>
                 <form action="/ui/set-score" method="post" class="space-y-2">
@@ -104,28 +107,38 @@ def home_ui():
             '''
         return f'''
         <div class="flex-shrink-0 min-w-[270px]">
-            <h3 class="text-xs font-extrabold text-amber-400 uppercase tracking-wider mb-2 text-center">{title} {phase_num if phase_num else ''}</h3>
+            <h3 class="text-xs font-extrabold text-amber-400 uppercase tracking-wider mb-2 text-center">{title}</h3>
             <div class="flex flex-col justify-around h-full">{cards}</div>
         </div>
         '''
 
-    winners_cols = "".join([render_col(p, ms, "Fase") for p, ms in sorted(phases_winners.items())])
-    losers_cols = "".join([render_col(p, ms, "Perdedores Fase") for p, ms in sorted(phases_losers.items())])
-    finals_cols = "".join([render_col(p, ms, "🏆 Grande Final") for p, ms in sorted(phases_finals.items())])
-
-    all_upper_cols = winners_cols + finals_cols
+    winners_cols = "".join([render_col(p, ms, f"Fase {p}" if p < 3 else "⚔️ Semi-Final") for p, ms in sorted(phases_winners.items())])
+    losers_cols = "".join([render_col(p, ms, f"Perdedores Fase {p}") for p, ms in sorted(phases_losers.items())])
+    finals_cols = "".join([render_col(p, ms, "🏆 Finais") for p, ms in sorted(phases_finals.items())])
 
     return f'''
     <!DOCTYPE html>
     <html lang="pt-br">
     <head>
         <meta charset="UTF-8">
-        <title>Chaveamento Futevôlei - Dupla Eliminação</title>
+        <title>Torneio Futevôlei - Com Linhas de Conexão</title>
         <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            .bracket-container {{ position: relative; }}
+            svg.lines-layer {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 1;
+            }}
+        </style>
     </head>
     <body class="bg-slate-900 min-h-screen text-white font-sans flex flex-col">
         
-        <header class="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-lg z-10">
+        <header class="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-lg z-20">
             <div class="flex items-center gap-3">
                 <button onclick="toggleSidebar()" class="bg-slate-700 hover:bg-slate-600 text-amber-400 font-bold px-3 py-2 rounded-lg border border-slate-600 flex items-center gap-2 text-sm">
                     ⚙️ Duplas ({len(db_teams)})
@@ -140,7 +153,7 @@ def home_ui():
 
         <div class="flex flex-1 relative overflow-hidden">
             
-            <aside id="sidebar" class="bg-slate-800 border-r border-slate-700 w-80 p-4 flex-shrink-0 transition-all duration-300 z-20 overflow-y-auto">
+            <aside id="sidebar" class="bg-slate-800 border-r border-slate-700 w-80 p-4 flex-shrink-0 transition-all duration-300 z-30 overflow-y-auto">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="font-bold text-md text-gray-200">Inscrição de Duplas</h2>
                     <button onclick="toggleSidebar()" class="text-gray-400 hover:text-white font-bold text-lg">✕</button>
@@ -157,27 +170,31 @@ def home_ui():
                 <ul class="max-h-96 overflow-y-auto">{teams_html}</ul>
             </aside>
 
-            <main class="flex-1 overflow-x-auto p-6 space-y-8 bg-slate-950">
+            <main class="flex-1 overflow-x-auto p-6 space-y-8 bg-slate-950 bracket-container">
+                <svg id="svg-lines" class="lines-layer"></svg>
+                
+                <!-- 1. CHAVE VENCEDORES -->
                 <div>
-                    <h2 class="text-xs font-black text-blue-400 uppercase tracking-widest mb-3">🔥 Chave Superior & Grande Final (Winners Bracket)</h2>
-                    <div class="flex gap-6 overflow-x-auto pb-4 border-b border-slate-800">
-                        {all_upper_cols or '<p class="text-gray-500 text-sm">Abra o menu de duplas, cadastre os times e clique em Gerar Chaves.</p>'}
+                    <h2 class="text-xs font-black text-blue-400 uppercase tracking-widest mb-3">🔥 CHAVE DE VENCEDORES, SEMI-FINAIS & FINAIS</h2>
+                    <div class="flex gap-12 overflow-x-auto pb-4 border-b border-slate-800">
+                        {winners_cols + finals_cols or '<p class="text-gray-500 text-sm">Abra o menu de duplas, cadastre 8 duplas e clique em Gerar Chaves.</p>'}
                     </div>
                 </div>
 
+                <!-- 2. CHAVE PERDEDORES -->
                 <div>
-                    <h2 class="text-xs font-black text-red-400 uppercase tracking-widest mb-3">💀 Chave de Perdedores (Losers Bracket)</h2>
-                    <div class="flex gap-6 overflow-x-auto pb-4">
-                        {losers_cols or '<p class="text-gray-500 text-sm">Abra o menu de duplas, cadastre os times e clique em Gerar Chaves.</p>'}
+                    <h2 class="text-xs font-black text-red-400 uppercase tracking-widest mb-3">💀 CHAVE DE PERDEDORES (REPESCAGEM)</h2>
+                    <div class="flex gap-12 overflow-x-auto pb-4">
+                        {losers_cols or '<p class="text-gray-500 text-sm">Abra o menu de duplas, cadastre 8 duplas e clique em Gerar Chaves.</p>'}
                     </div>
                 </div>
+
             </main>
         </div>
 
         <script>
             function toggleSidebar() {{
-                const sidebar = document.getElementById('sidebar');
-                sidebar.classList.toggle('hidden');
+                document.getElementById('sidebar').classList.toggle('hidden');
             }}
 
             function editTeam(id, name) {{
@@ -196,6 +213,58 @@ def home_ui():
                 document.getElementById('submitBtn').innerText = '+ Cadastrar Dupla';
                 document.getElementById('cancelBtn').classList.add('hidden');
             }}
+
+            function drawBracketLines() {{
+                const svg = document.getElementById('svg-lines');
+                const container = document.querySelector('.bracket-container');
+                if (!svg || !container) return;
+
+                svg.innerHTML = '';
+                const containerRect = container.getBoundingClientRect();
+                
+                svg.setAttribute('width', container.scrollWidth);
+                svg.setAttribute('height', container.scrollHeight);
+
+                const cards = document.querySelectorAll('.match-card');
+                
+                cards.forEach(card => {{
+                    const wNextId = card.getAttribute('data-wnext');
+                    const lNextId = card.getAttribute('data-lnext');
+
+                    if (wNextId) drawLineBetween(card, document.getElementById('match-' + wNextId), '#f59e0b', containerRect, svg);
+                    if (lNextId) drawLineBetween(card, document.getElementById('match-' + lNextId), '#ef4444', containerRect, svg);
+                }});
+            }}
+
+            function drawLineBetween(startEl, endEl, color, containerRect, svg) {{
+                if (!startEl || !endEl) return;
+
+                const r1 = startEl.getBoundingClientRect();
+                const r2 = endEl.getBoundingClientRect();
+
+                const x1 = r1.right - containerRect.left + document.querySelector('.bracket-container').scrollLeft;
+                const y1 = r1.top + (r1.height / 2) - containerRect.top + document.querySelector('.bracket-container').scrollTop;
+
+                const x2 = r2.left - containerRect.left + document.querySelector('.bracket-container').scrollLeft;
+                const y2 = r2.top + (r2.height / 2) - containerRect.top + document.querySelector('.bracket-container').scrollTop;
+
+                const midX = x1 + (x2 - x1) / 2;
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                const d = `M ${{x1}} ${{y1}} L ${{midX}} ${{y1}} L ${{midX}} ${{y2}} L ${{x2}} ${{y2}}`;
+                
+                path.setAttribute('d', d);
+                path.setAttribute('stroke', color);
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('opacity', '0.6');
+
+                svg.appendChild(path);
+            }}
+
+            window.addEventListener('load', drawBracketLines);
+            window.addEventListener('resize', drawBracketLines);
+            document.querySelector('.bracket-container').addEventListener('scroll', drawBracketLines);
         </script>
     </body>
     </html>
@@ -219,55 +288,44 @@ def ui_delete_team(team_id: int = Form(...)):
     db_teams = [t for t in db_teams if t.id != team_id]
     return HTMLResponse('<script>window.location.href="/";</script>')
 
+# --- CONEXÕES ATUALIZADAS ---
 @app.post("/ui/generate")
 def ui_generate():
     global db_matches
     db_matches.clear()
     
     total = len(db_teams)
-    if total < 4:
-        return HTMLResponse('<script>alert("Cadastre pelo menos 4 duplas!"); window.location.href="/";</script>')
+    if total < 8:
+        return HTMLResponse('<script>alert("Cadastre pelo menos 8 duplas!"); window.location.href="/";</script>')
 
-    # 1. CHAVE SUPERIOR (Winners)
-    # Fase 1
-    db_matches.append(Match(id=1, bracket=BracketType.WINNERS, phase=1, team1_id=db_teams[0].id, team2_id=db_teams[1].id, winner_next_match_id=5, loser_next_match_id=8, loser_slot=1))
-    db_matches.append(Match(id=2, bracket=BracketType.WINNERS, phase=1, team1_id=db_teams[2].id, team2_id=db_teams[3].id, winner_next_match_id=5, loser_next_match_id=8, loser_slot=2))
-    
-    t5 = db_teams[4].id if total > 4 else None
-    t6 = db_teams[5].id if total > 5 else None
-    t7 = db_teams[6].id if total > 6 else None
-    t8 = db_teams[7].id if total > 7 else None
-    
-    db_matches.append(Match(id=3, bracket=BracketType.WINNERS, phase=1, team1_id=t5, team2_id=t6, winner_next_match_id=6, loser_next_match_id=9, loser_slot=1))
-    db_matches.append(Match(id=4, bracket=BracketType.WINNERS, phase=1, team1_id=t7, team2_id=t8, winner_next_match_id=6, loser_next_match_id=9, loser_slot=2))
+    # 1. CHAVE DOS CAMPEÕES - FASE 1 (Perdedores vão para Repescagem Fase 1: Jogos 5 e 6)
+    db_matches.append(Match(id=1, bracket=BracketType.WINNERS, phase=1, title="Jogo 1", team1_id=db_teams[0].id, team2_id=db_teams[1].id, winner_next_match_id=7, winner_slot=1, loser_next_match_id=5, loser_slot=1))
+    db_matches.append(Match(id=2, bracket=BracketType.WINNERS, phase=1, title="Jogo 2", team1_id=db_teams[2].id, team2_id=db_teams[3].id, winner_next_match_id=7, winner_slot=2, loser_next_match_id=5, loser_slot=2))
+    db_matches.append(Match(id=3, bracket=BracketType.WINNERS, phase=1, title="Jogo 3", team1_id=db_teams[4].id, team2_id=db_teams[5].id, winner_next_match_id=8, winner_slot=1, loser_next_match_id=6, loser_slot=1))
+    db_matches.append(Match(id=4, bracket=BracketType.WINNERS, phase=1, title="Jogo 4", team1_id=db_teams[6].id, team2_id=db_teams[7].id, winner_next_match_id=8, winner_slot=2, loser_next_match_id=6, loser_slot=2))
 
-    # Fase 2
-    # Perdedores de cima caem para os jogos 11 e 10 na Posição 1
-    db_matches.append(Match(id=5, bracket=BracketType.WINNERS, phase=2, winner_next_match_id=7, loser_next_match_id=11, loser_slot=1))
-    db_matches.append(Match(id=6, bracket=BracketType.WINNERS, phase=2, winner_next_match_id=7, loser_next_match_id=10, loser_slot=1))
+    # 2. REPESCAGEM - FASE 1 (Perdedores da Fase 1 jogam entre si)
+    # Vencedores avançam para a Repescagem Fase 2 (Jogos 9 e 10)
+    db_matches.append(Match(id=5, bracket=BracketType.LOSERS, phase=1, title="Perdedores J1/J2", winner_next_match_id=9, winner_slot=2))
+    db_matches.append(Match(id=6, bracket=BracketType.LOSERS, phase=1, title="Perdedores J3/J4", winner_next_match_id=10, winner_slot=2))
 
-    # Fase 3 (Final da Chave Superior)
-    # Vencedor -> Jogo 13 (Grande Final, Slot 1)
-    db_matches.append(Match(id=7, bracket=BracketType.WINNERS, phase=3, winner_next_match_id=13))
+    # 3. CHAVE DOS CAMPEÕES - FASE 2
+    # Vencedores vão pras Semis; Perdedores caem para a Repescagem Fase 2 (Jogos 9 e 10)
+    db_matches.append(Match(id=7, bracket=BracketType.WINNERS, phase=2, title="Vencedores J1/J2", winner_next_match_id=11, winner_slot=1, loser_next_match_id=10, loser_slot=1))
+    db_matches.append(Match(id=8, bracket=BracketType.WINNERS, phase=2, title="Vencedores J3/J4", winner_next_match_id=12, winner_slot=1, loser_next_match_id=9, loser_slot=1))
 
-    # 2. CHAVE DE BAIXO (Losers)
-    # Perdedores Fase 1
-    db_matches.append(Match(id=8, bracket=BracketType.LOSERS, phase=1, winner_next_match_id=10))
-    db_matches.append(Match(id=9, bracket=BracketType.LOSERS, phase=1, winner_next_match_id=11))
+    # 4. REPESCAGEM - FASE 2 (Vencedor R-Fase1 vs Perdedor C-Fase2)
+    # Vencedores vão para as Semis no Slot 2!
+    db_matches.append(Match(id=9, bracket=BracketType.LOSERS, phase=2, title="Repescagem Fase 2 (A)", winner_next_match_id=11, winner_slot=2))
+    db_matches.append(Match(id=10, bracket=BracketType.LOSERS, phase=2, title="Repescagem Fase 2 (B)", winner_next_match_id=12, winner_slot=2))
 
-    # Perdedores Fase 2
-    # Vencedor do Jogo 10 -> Vai para o Jogo 12 na Posição 1 (Topo)
-    # Vencedor do Jogo 11 -> Vai para o Jogo 12 na Posição 2 (Baixo)
-    db_matches.append(Match(id=10, bracket=BracketType.LOSERS, phase=2, winner_next_match_id=12))
-    db_matches.append(Match(id=11, bracket=BracketType.LOSERS, phase=2, winner_next_match_id=12))
+    # 5. SEMI-FINALS
+    db_matches.append(Match(id=11, bracket=BracketType.WINNERS, phase=3, title="Semi-Final 1", winner_next_match_id=14, winner_slot=1, loser_next_match_id=13, loser_slot=1))
+    db_matches.append(Match(id=12, bracket=BracketType.WINNERS, phase=3, title="Semi-Final 2", winner_next_match_id=14, winner_slot=2, loser_next_match_id=13, loser_slot=2))
 
-    # Perdedores Fase 3 (Final da Repescagem)
-    # Vencedor -> Jogo 13 (Grande Final, Slot 2)
-    db_matches.append(Match(id=12, bracket=BracketType.LOSERS, phase=3, winner_next_match_id=13))
-
-    # 3. GRANDE FINAL (Jogo 13)
-    # Vencedor do Jogo 7 (Slot 1) vs Vencedor do Jogo 12 (Slot 2)
-    db_matches.append(Match(id=13, bracket=BracketType.FINALS, phase=1))
+    # 6. FINAIS
+    db_matches.append(Match(id=13, bracket=BracketType.FINALS, phase=4, title="3º Lugar"))
+    db_matches.append(Match(id=14, bracket=BracketType.FINALS, phase=4, title="🏆 Grande Final"))
 
     return HTMLResponse('<script>window.location.href="/";</script>')
 
@@ -283,38 +341,22 @@ def ui_set_score(match_id: int = Form(...), score1: int = Form(...), score2: int
         else:
             match.winner_id, match.loser_id = match.team2_id, match.team1_id
 
-        # 1. MOVER O VENCEDOR
+        # Mover Vencedor
         if match.winner_next_match_id:
             next_w = next((m for m in db_matches if m.id == match.winner_next_match_id), None)
             if next_w:
-                # Perdedores Fase 1 (Jogo 8/9) -> Posição 2 (Baixo) do Jogo 10/11
-                if match.bracket == BracketType.LOSERS and match.phase == 1:
-                    next_w.team2_id = match.winner_id
-                # Vencedor do Jogo 10 -> Posição 1 (Topo) do Jogo 12
-                elif match.id == 10:
-                    next_w.team1_id = match.winner_id
-                # Vencedor do Jogo 11 -> Posição 2 (Baixo) do Jogo 12
-                elif match.id == 11:
-                    next_w.team2_id = match.winner_id
-                # Vencedor da Fase 3 dos Perdedores (Jogo 12) -> Slot 2 da Grande Final (Jogo 13)
-                elif match.id == 12:
-                    next_w.team2_id = match.winner_id
-                # Vencedor da Fase 3 de Cima (Jogo 7) -> Slot 1 da Grande Final (Jogo 13)
-                elif match.id == 7:
+                if match.winner_slot == 1:
                     next_w.team1_id = match.winner_id
                 else:
-                    if next_w.team1_id is None:
-                        next_w.team1_id = match.winner_id
-                    else:
-                        next_w.team2_id = match.winner_id
+                    next_w.team2_id = match.winner_id
 
-        # 2. MOVER O PERDEDOR (Que cai de cima)
+        # Mover Perdedor
         if match.loser_next_match_id:
             next_l = next((m for m in db_matches if m.id == match.loser_next_match_id), None)
             if next_l:
                 if match.loser_slot == 1:
-                    next_l.team1_id = match.loser_id  # Posição 1 (Topo)
+                    next_l.team1_id = match.loser_id
                 else:
-                    next_l.team2_id = match.loser_id  # Posição 2 (Baixo)
+                    next_l.team2_id = match.loser_id
 
     return HTMLResponse('<script>window.location.href="/";</script>')
